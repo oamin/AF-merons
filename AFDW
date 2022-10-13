@@ -1,0 +1,150 @@
+% Monte Carlo simulation to find relaxed state of an antiferromagnetic 180d
+% domain wall initialised with two points of chirality reveral.
+% Parameters used are consistent with anisotropy and exchange values of
+% CuMnAs.
+% Written by O. J. Amin, last edited 13/09/2022.
+
+close all; clear all; clc
+
+nx = 51; % Number of spins in x.
+ny = 51; % Number of spins in y.
+iter = 2*nx*ny*5e4; % Number of iterations.
+
+% Set half spins pointing in +y and half in -y.
+lay1 = pi/2 * ones(ny, nx);
+lay1(:,26:end) = -pi/2;
+
+% Initialise domain wall with two points of chirality reversal.
+for i = [1:17,35:51] 
+   dw_temp = [pi/4; 0; -pi/4];
+   lay1(i,24:26)=dw_temp;
+end
+for i = 18:34
+   dw_temp = [3*pi/4; pi; -3*pi/4];
+   lay1(i,24:26)=dw_temp;
+end
+
+% Define second sublattice, antiparallel to first.
+lay2 = lay1+pi;
+
+% Separate into azimuthal and polar angles and pad boundaries with NaNs
+% (close boundary conditions).
+lay_theta = cat(3, padarray(lay1,[0 1],NaN,'pre'), padarray(lay2,[0 1],NaN,'post'));
+lay_phi = cat(3, padarray(zeros(size(lay1)),[0 1],NaN,'pre'), padarray(zeros(size(lay2)),[0 1],NaN,'post'));
+
+% Plot initial state as quiver.
+figure(1)
+quiver(cos(lay_phi(:,:,1)).*cos(lay_theta(:,:,1)),cos(lay_phi(:,:,1)).*sin(lay_theta(:,:,1)))
+
+tic
+
+% Generate arrays of random spin site choices and polar and azimuthal
+% rotations.
+randtheta_vect = rand(iter,1);
+randphi_vect = rand(iter,1);
+randlay_vect = randi(size(lay_theta,3),[iter, 1]);
+randsite_vect = randi(nx*ny,[iter, 1]);
+
+% System parameter values.
+Bu = 0.5e-6; % Uniaxial anisotropy.
+Bex = 2000e-6; % Exchange.
+Boop = 127e-6; % Out-of-plane anisotropy.
+Beff = 0; % Spin-torque effective field.
+
+% Perform Monte Carlo iterations.
+for i = 1:iter
+    rand_lay = randlay_vect(i);
+    rand_theta = 2 * pi * randtheta_vect(i);
+    rand_phi = 2 * pi * randphi_vect(i);
+    rand_site = randsite_vect(i);
+    [site_x, site_y] = ind2sub([ny, nx], rand_site);
+    site_y = site_y + mod(rand_lay, size(lay_theta,3));
+    
+    [lay_theta, lay_phi] = gridupdate(lay_theta, lay_phi, site_x, site_y, rand_lay, rand_theta, rand_phi, Bex, Bu, Beff, Boop);
+end
+
+% Plot final state as quiver.
+figure(2)
+quiver(cos(lay_phi(:,:,1)).*cos(lay_theta(:,:,1)), cos(lay_phi(:,:,1)).*sin(lay_theta(:,:,1)))
+axis off
+set(gca,'YDir','normal')
+xlim([2 51])
+axis square
+
+% Plot x-component of top sublattice magnetisation.
+figure(3)
+cmap = flipud(brewermap([],'spectral'));
+imshow((cos(lay_phi(:,:,1)).*cos(lay_theta(:,:,1))), 'Colormap', cmap, 'DisplayRange', [-1 1]);
+set(gca,'YDir','normal')
+xlim([2 51])
+% Plot y-component of top sublattice magnetisation.
+figure(4)
+imshow((cos(lay_phi(:,:,1)).*sin(lay_theta(:,:,1))), 'Colormap', cmap, 'DisplayRange', [-1 1]);
+set(gca,'YDir','normal')
+xlim([2 51])
+% Plot z-component of top sublattice magnetisation.
+figure(5)
+imshow(abs(sin(lay_phi(:,:,1))), 'Colormap', cmap, 'DisplayRange', [-1 1]);
+set(gca,'YDir','normal')
+xlim([2 51])
+
+% Plot 3D quiver of final state.
+Z = ones(size(lay_theta(:,:,1)));
+figure(6)
+quiver3(Z, cos(lay_phi(:,:,1)).*cos(lay_theta(:,:,1)),...
+    cos(lay_phi(:,:,1)).*sin(lay_theta(:,:,1)),...
+    abs(sin(lay_phi(:,:,1))))
+zlim([0 10])
+
+% Plot final state as seen in PEEM.
+figure(7)
+imshow((cos(lay_theta(:,:,1)+pi/4)).^2, [0 1]);
+set(gca,'YDir','normal')
+xlim([2 51])
+
+toc
+
+% Monte Carlo algorithm.
+function [M_theta, M_phi] = gridupdate(M_theta,M_phi,randsite_x,randsite_y,rand_lay,randomtheta,randomphi,Bex,Bu,Beff,Boop)
+
+%--------------- Finding neighbouring spins ---------------%
+Mneighbs_theta = [M_theta(mod(randsite_x  - 2*mod(rand_lay,size(M_theta,3)), size(M_theta,1)) + 1, randsite_y, mod(rand_lay,size(M_theta,3)) + 1),...
+    M_theta(randsite_x, randsite_y, mod(rand_lay,size(M_theta,3)) + 1),...
+    M_theta(randsite_x, randsite_y  - (2*mod(rand_lay,size(M_theta,3)) - 1), mod(rand_lay,size(M_theta,3)) + 1),...
+    M_theta(mod(randsite_x  - 2*mod(rand_lay,size(M_theta,3)), size(M_theta,1)) + 1, randsite_y  - (2*mod(rand_lay,size(M_theta,3)) - 1), mod(rand_lay,size(M_theta,3)) + 1)]; % Find neighbouring sites of randomly picked spin.
+Mneighbs_theta = Mneighbs_theta(~isnan(Mneighbs_theta)); % Get rid of NaNs.
+
+Mneighbs_phi = [M_phi(mod(randsite_x  - 2*mod(rand_lay,size(M_phi,3)), size(M_phi,1)) + 1, randsite_y, mod(rand_lay,size(M_phi,3)) + 1),...
+    M_phi(randsite_x, randsite_y, mod(rand_lay,size(M_phi,3)) + 1),...
+    M_phi(randsite_x, randsite_y  - (2*mod(rand_lay,size(M_phi,3)) - 1), mod(rand_lay,size(M_phi,3)) + 1),...
+    M_phi(mod(randsite_x  - 2*mod(rand_lay,size(M_phi,3)), size(M_phi,1)) + 1, randsite_y  - (2*mod(rand_lay,size(M_phi,3)) - 1), mod(rand_lay,size(M_phi,3)) + 1)]; % Find neighbouring sites of randomly picked spin.
+Mneighbs_phi = Mneighbs_phi(~isnan(Mneighbs_phi)); % Get rid of NaNs.
+
+%--------------- New angle to be considered ---------------%
+Mnew_theta = randomtheta;    % New spin.
+Mnew_phi = M_phi(randsite_x, randsite_y, rand_lay) + randomphi;
+B_theta = 0;             % Angle of effective field where dtheta = 0 is field pointing in +x.
+
+%--------------- Energy constants ---------------%
+T = 1;                              % Temperature.
+
+%--------------- Energy difference equation ---------------%
+% Change in energy between new and old spin.
+Bex_init = Bex*(cos(M_phi(randsite_x, randsite_y, rand_lay))*sum(cos(Mneighbs_phi).*cos(M_theta(randsite_x, randsite_y, rand_lay)-Mneighbs_theta)) + sin(M_phi(randsite_x, randsite_y, rand_lay))*sum(sin(Mneighbs_phi)));
+Boop_init = Boop*sin(M_phi(randsite_x, randsite_y, rand_lay))^2;
+Bu_init = Bu*cos(M_theta(randsite_x, randsite_y, rand_lay))^2 * cos(M_phi(randsite_x, randsite_y, rand_lay));
+B_init = -Beff*(2*mod(rand_lay,size(M_theta,3)-1))*(cos(B_theta)*cos(M_phi(randsite_x, randsite_y, rand_lay))*cos(M_theta(randsite_x, randsite_y, rand_lay)) + sin(B_theta)*cos(M_phi(randsite_x, randsite_y, rand_lay))*sin(M_theta(randsite_x, randsite_y, rand_lay)));
+
+Bex_new = Bex*(cos(Mnew_phi)*sum(cos(Mneighbs_phi).*cos(Mnew_theta-Mneighbs_theta)) + sin(Mnew_phi)*sum(sin(Mneighbs_phi)));
+Boop_new = Boop*sin(Mnew_phi)^2;
+Bu_new = Bu*cos(Mnew_theta)^2 * cos(Mnew_phi);
+B_new = -Beff*(2*mod(rand_lay,size(M_theta,3)-1))*(cos(B_theta)*cos(Mnew_phi)*cos(Mnew_theta) + sin(B_theta)*cos(Mnew_phi)*sin(Mnew_theta));
+
+dE = (Bex_new - Bex_init) + (Boop_new - Boop_init) + (Bu_new - Bu_init) + (B_new - B_init);
+
+%--------------- Condition to accept new spin ---------------%
+if dE<=0 || rand()<=exp(-dE/(T*1.38064852e-23))
+    M_theta(randsite_x,randsite_y,rand_lay) = Mnew_theta;
+    M_phi(randsite_x, randsite_y, rand_lay) = Mnew_phi;
+end
+end
